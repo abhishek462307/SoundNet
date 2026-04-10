@@ -6,10 +6,10 @@ class AnalyticsService {
     this.queryLogStore = queryLogStore;
   }
 
-  async getSummary() {
+  async getSummary(options = {}) {
     const capabilities = await this.capabilityStore.list();
-    const logs = await this.executionLogStore.list();
-    const queryLogs = this.queryLogStore ? await this.queryLogStore.list() : [];
+    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
+    const queryLogs = filterByDateRange(this.queryLogStore ? await this.queryLogStore.list() : [], options, 'created_at');
 
     const totalExecutions = logs.length;
     const successfulExecutions = logs.filter((log) => log.success).length;
@@ -30,19 +30,19 @@ class AnalyticsService {
     };
   }
 
-  async getCapabilityStats() {
+  async getCapabilityStats(options = {}) {
     const capabilities = await this.capabilityStore.list();
-    const logs = await this.executionLogStore.list();
-
-    return capabilities.map((capability) => buildCapabilityAnalytics(capability, logs));
+    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
+    const items = capabilities.map((capability) => buildCapabilityAnalytics(capability, logs));
+    return paginate(items, options);
   }
 
-  async getServerStats() {
+  async getServerStats(options = {}) {
     const servers = await this.mcpServerStore.list();
     const capabilities = await this.capabilityStore.list();
-    const logs = await this.executionLogStore.list();
+    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
 
-    return servers.map((server) => {
+    const items = servers.map((server) => {
       const serverCapabilities = capabilities.filter((capability) => capability.source_server_id === server.id);
       const capabilityIds = new Set(serverCapabilities.map((capability) => capability.id));
       const serverLogs = logs.filter((log) => capabilityIds.has(log.capability_id));
@@ -64,11 +64,13 @@ class AnalyticsService {
         last_sync_at: server.last_sync_at || null
       };
     });
+
+    return paginate(items, options);
   }
 
-  async getTopTools(limit = 5) {
+  async getTopTools(limit = 5, options = {}) {
     const capabilities = await this.capabilityStore.list();
-    const logs = await this.executionLogStore.list();
+    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
 
     return capabilities
       .map((capability) => buildCapabilityAnalytics(capability, logs))
@@ -81,8 +83,8 @@ class AnalyticsService {
       .slice(0, Number(limit || 5));
   }
 
-  async getTopQueries(limit = 10) {
-    const queryLogs = this.queryLogStore ? await this.queryLogStore.list() : [];
+  async getTopQueries(limit = 10, options = {}) {
+    const queryLogs = filterByDateRange(this.queryLogStore ? await this.queryLogStore.list() : [], options, 'created_at');
     const summary = new Map();
 
     for (const log of queryLogs) {
@@ -109,6 +111,43 @@ class AnalyticsService {
       .sort((left, right) => right.count - left.count)
       .slice(0, Number(limit || 10));
   }
+
+  async getExecutionTrends(options = {}) {
+    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
+    const buckets = new Map();
+
+    for (const log of logs) {
+      const bucket = toDayBucket(log.created_at);
+      if (!buckets.has(bucket)) {
+        buckets.set(bucket, {
+          bucket,
+          total_executions: 0,
+          successful_executions: 0,
+          failed_executions: 0,
+          total_latency_ms: 0
+        });
+      }
+
+      const entry = buckets.get(bucket);
+      entry.total_executions += 1;
+      if (log.success) {
+        entry.successful_executions += 1;
+      } else {
+        entry.failed_executions += 1;
+      }
+      entry.total_latency_ms += Number(log.latency_ms || 0);
+    }
+
+    return Array.from(buckets.values())
+      .sort((left, right) => left.bucket.localeCompare(right.bucket))
+      .map((entry) => ({
+        bucket: entry.bucket,
+        total_executions: entry.total_executions,
+        successful_executions: entry.successful_executions,
+        failed_executions: entry.failed_executions,
+        average_latency_ms: entry.total_executions ? entry.total_latency_ms / entry.total_executions : null
+      }));
+  }
 }
 
 function buildCapabilityAnalytics(capability, logs) {
@@ -130,6 +169,97 @@ function buildCapabilityAnalytics(capability, logs) {
     success_rate: totalRuns ? successfulRuns / totalRuns : null,
     average_latency_ms: averageLatencyMs
   };
+}
+
+function paginate(items, options = {}) {
+  const limit = normalizeLimit(options.limit, 25);
+  const offset = normalizeOffset(options.offset, 0);
+
+  return {
+    items: items.slice(offset, offset + limit),
+    pagination: {
+      total: items.length,
+      limit,
+      offset,
+      has_more: offset + limit < items.length
+    }
+  };
+}
+
+function filterByDateRange(items, options = {}, field = 'created_at') {
+  const from = parseOptionalDate(options.from, 'from');
+  const to = parseOptionalDate(options.to, 'to');
+
+  return items.filter((item) => {
+    const value = item?.[field];
+    if (!value) {
+      return true;
+    }
+
+    const timestamp = Date.parse(value);
+    if (Number.isNaN(timestamp)) {
+      return false;
+    }
+
+    if (from && timestamp < from.getTime()) {
+      return false;
+    }
+
+    if (to && timestamp > to.getTime()) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function parseOptionalDate(value, fieldName) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    const error = new Error(`${fieldName} must be a valid ISO date`);
+    error.status = 400;
+    throw error;
+  }
+
+  return date;
+}
+
+function normalizeLimit(value, fallback) {
+  if (typeof value === 'undefined') {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 100) {
+    const error = new Error('limit must be an integer between 1 and 100');
+    error.status = 400;
+    throw error;
+  }
+
+  return parsed;
+}
+
+function normalizeOffset(value, fallback) {
+  if (typeof value === 'undefined') {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    const error = new Error('offset must be a non-negative integer');
+    error.status = 400;
+    throw error;
+  }
+
+  return parsed;
+}
+
+function toDayBucket(value) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
 module.exports = { AnalyticsService };

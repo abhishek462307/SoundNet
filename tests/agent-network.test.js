@@ -13,6 +13,7 @@ const { MessageService } = require('../services/messageService');
 const { AuditService } = require('../services/auditService');
 const { UserService } = require('../services/userService');
 const { hashToken } = require('../services/userService');
+const { calculateNextRetryAt } = require('../services/messageService');
 
 function createMemoryStore() {
   const capabilities = []; const logs = []; const servers = []; const queries = []; const agents = []; const messages = []; const audits = []; const users = [];
@@ -44,6 +45,7 @@ function createMemoryStore() {
 
 async function buildTestHarness() {
   const stores = createMemoryStore();
+  const delivered = [];
   const capabilityService = new CapabilityService({ capabilityStore: stores.capabilityStore, executionLogStore: stores.executionLogStore, queryLogStore: stores.queryLogStore, baseUrl: 'http://127.0.0.1:0' });
   const mcpServerService = new MpcServerService({ mcpServerStore: stores.mcpServerStore, capabilityStore: stores.capabilityStore, baseUrl: 'http://127.0.0.1:0' });
   const schedulerService = new SchedulerService({ mcpServerService });
@@ -51,13 +53,22 @@ async function buildTestHarness() {
   const dataRepairService = new DataRepairService({ capabilityStore: stores.capabilityStore });
   const analyticsService = new AnalyticsService({ capabilityStore: stores.capabilityStore, executionLogStore: stores.executionLogStore, mcpServerStore: stores.mcpServerStore, queryLogStore: stores.queryLogStore });
   const agentService = new AgentService({ agentStore: stores.agentStore });
-  const messageService = new MessageService({ agentStore: stores.agentStore, messageStore: stores.messageStore });
+  const messageService = new MessageService({
+    agentStore: stores.agentStore,
+    messageStore: stores.messageStore,
+    deliveryClient: {
+      async deliver(payload) {
+        delivered.push(payload);
+        return { ok: true };
+      }
+    }
+  });
   const auditService = new AuditService({ auditLogStore: stores.auditLogStore });
   const userService = new UserService({ userStore: stores.userStore });
   const readinessState = { ready: true };
   const app = createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, userService, readinessState });
   const server = await new Promise((resolve, reject) => { const instance = app.listen(0, ()=>resolve(instance)); instance.on('error', reject); });
-  return { app, server, stores };
+  return { app, server, stores, delivered };
 }
 
 async function closeServer(server){ await new Promise((resolve,reject)=>server.close(err=>err?reject(err):resolve())); }
@@ -231,7 +242,7 @@ test('messages support threads and acknowledgements', async () => {
 
 test('admin can inspect and process delivery queue with retries', async () => {
   process.env.ADMIN_API_KEY = 'secret-admin';
-  const { app, server } = await buildTestHarness();
+  const { app, server, delivered } = await buildTestHarness();
   try {
     const sender = await request(app)
       .post('/agents/register')
@@ -286,6 +297,132 @@ test('admin can inspect and process delivery queue with retries', async () => {
     assert.equal(secondProcess.status, 200);
     assert.equal(secondProcess.body.messages[0].status, 'failed');
     assert.equal(secondProcess.body.messages[0].attempts, 2);
+    assert.equal(delivered.length, 0);
+  } finally {
+    delete process.env.ADMIN_API_KEY;
+    await closeServer(server);
+  }
+});
+
+test('queue processing delivers webhook-capable messages', async () => {
+  process.env.ADMIN_API_KEY = 'secret-admin';
+  const { app, server, delivered } = await buildTestHarness();
+  try {
+    const sender = await request(app)
+      .post('/agents/register')
+      .send({ name: 'sender-live', description: 'sender', endpoint: 'http://sender-live.local' });
+
+    const receiver = await request(app)
+      .post('/agents/register')
+      .send({ name: 'receiver-live', description: 'receiver', endpoint: 'http://receiver-live.local/hook', protocol: 'webhook' });
+
+    const queued = await request(app)
+      .post('/messages')
+      .send({
+        from_agent_id: sender.body.id,
+        to_agent_id: receiver.body.id,
+        body: 'Webhook message'
+      });
+
+    assert.equal(queued.status, 201);
+    assert.equal(queued.body.delivery_mode, 'webhook');
+
+    const processed = await request(app)
+      .post('/messages/queue/process')
+      .set('x-admin-key', 'secret-admin')
+      .send({ now: '2026-04-10T11:00:00.000Z' });
+
+    assert.equal(processed.status, 200);
+    assert.equal(processed.body.messages[0].status, 'delivered');
+    assert.equal(delivered.length, 1);
+    assert.equal(delivered[0].target.endpoint, 'http://receiver-live.local/hook');
+    assert.equal(delivered[0].message.body, 'Webhook message');
+  } finally {
+    delete process.env.ADMIN_API_KEY;
+    await closeServer(server);
+  }
+});
+
+test('retry backoff uses exponential scheduling', async () => {
+  const nextRetry = calculateNextRetryAt('2026-04-10T10:00:00.000Z', 1, 30000);
+  assert.equal(nextRetry, '2026-04-10T10:00:30.000Z');
+
+  const secondRetry = calculateNextRetryAt('2026-04-10T10:00:00.000Z', 2, 30000);
+  assert.equal(secondRetry, '2026-04-10T10:01:00.000Z');
+
+  const thirdRetry = calculateNextRetryAt('2026-04-10T10:00:00.000Z', 3, 30000);
+  assert.equal(thirdRetry, '2026-04-10T10:02:00.000Z');
+});
+
+test('scheduler status reports delivery worker configuration', async () => {
+  process.env.ADMIN_API_KEY = 'secret-admin';
+  const stores = createMemoryStore();
+  const capabilityService = new CapabilityService({ capabilityStore: stores.capabilityStore, executionLogStore: stores.executionLogStore, queryLogStore: stores.queryLogStore, baseUrl: 'http://127.0.0.1:0' });
+  const mcpServerService = new MpcServerService({ mcpServerStore: stores.mcpServerStore, capabilityStore: stores.capabilityStore, baseUrl: 'http://127.0.0.1:0' });
+  const messageService = new MessageService({ agentStore: stores.agentStore, messageStore: stores.messageStore, retryBaseDelayMs: 15000, deliveryClient: { async deliver() { return { ok: true }; } } });
+  const schedulerService = new SchedulerService({ mcpServerService, messageService, deliveryIntervalMs: 2000 });
+  const mcpCatalogService = new McpCatalogService({ mcpServerService, baseUrl: 'http://127.0.0.1:0' });
+  const dataRepairService = new DataRepairService({ capabilityStore: stores.capabilityStore });
+  const analyticsService = new AnalyticsService({ capabilityStore: stores.capabilityStore, executionLogStore: stores.executionLogStore, mcpServerStore: stores.mcpServerStore, queryLogStore: stores.queryLogStore });
+  const agentService = new AgentService({ agentStore: stores.agentStore });
+  const auditService = new AuditService({ auditLogStore: stores.auditLogStore });
+  const userService = new UserService({ userStore: stores.userStore });
+  const readinessState = { ready: true };
+  const app = createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, userService, readinessState });
+  const server = await new Promise((resolve, reject) => { const instance = app.listen(0, ()=>resolve(instance)); instance.on('error', reject); });
+
+  try {
+    const response = await request(app)
+      .get('/system/scheduler')
+      .set('x-admin-key', 'secret-admin');
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.delivery_interval_ms, 2000);
+    assert.equal(response.body.delivery_running, false);
+  } finally {
+    delete process.env.ADMIN_API_KEY;
+    await closeServer(server);
+  }
+});
+
+test('analytics supports time windows, pagination, and trends', async () => {
+  process.env.ADMIN_API_KEY = 'secret-admin';
+  const { app, server, stores } = await buildTestHarness();
+  try {
+    await stores.capabilityStore.create({ id: 'cap-1', name: 'search_docs', description: 'Search docs', endpoint: 'http://tool.local/search', method: 'POST', input_schema: {}, output_schema: {}, auth_type: 'none', tags: ['docs'], rating: 5, source_type: 'http', status: 'active', provider: 'internal', category: 'search' });
+    await stores.capabilityStore.create({ id: 'cap-2', name: 'summarize_text', description: 'Summarize text', endpoint: 'http://tool.local/summarize', method: 'POST', input_schema: {}, output_schema: {}, auth_type: 'none', tags: ['text'], rating: 4, source_type: 'http', status: 'active', provider: 'internal', category: 'nlp' });
+
+    await stores.executionLogStore.create({ id: 'log-1', capability_id: 'cap-1', success: true, latency_ms: 120, created_at: '2026-04-09T10:00:00.000Z' });
+    await stores.executionLogStore.create({ id: 'log-2', capability_id: 'cap-1', success: false, latency_ms: 300, created_at: '2026-04-10T10:00:00.000Z' });
+    await stores.executionLogStore.create({ id: 'log-3', capability_id: 'cap-2', success: true, latency_ms: 80, created_at: '2026-04-10T11:00:00.000Z' });
+    await stores.queryLogStore.create({ id: 'query-1', query: 'search docs', filters: {}, result_count: 1, created_at: '2026-04-09T09:00:00.000Z' });
+    await stores.queryLogStore.create({ id: 'query-2', query: 'summarize text', filters: {}, result_count: 1, created_at: '2026-04-10T09:00:00.000Z' });
+
+    const summary = await request(app)
+      .get('/analytics/summary?from=2026-04-10T00:00:00.000Z&to=2026-04-10T23:59:59.000Z')
+      .set('x-admin-key', 'secret-admin');
+
+    assert.equal(summary.status, 200);
+    assert.equal(summary.body.total_executions, 2);
+    assert.equal(summary.body.total_queries, 1);
+
+    const pagedCapabilities = await request(app)
+      .get('/analytics/capabilities?limit=1&offset=1')
+      .set('x-admin-key', 'secret-admin');
+
+    assert.equal(pagedCapabilities.status, 200);
+    assert.equal(Array.isArray(pagedCapabilities.body.items), true);
+    assert.equal(pagedCapabilities.body.items.length, 1);
+    assert.equal(pagedCapabilities.body.pagination.total >= 2, true);
+
+    const trends = await request(app)
+      .get('/analytics/trends/executions?from=2026-04-09T00:00:00.000Z&to=2026-04-10T23:59:59.000Z')
+      .set('x-admin-key', 'secret-admin');
+
+    assert.equal(trends.status, 200);
+    assert.equal(trends.body.length, 2);
+    assert.equal(trends.body[0].bucket, '2026-04-09');
+    assert.equal(trends.body[1].bucket, '2026-04-10');
   } finally {
     delete process.env.ADMIN_API_KEY;
     await closeServer(server);

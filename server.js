@@ -34,12 +34,13 @@ async function bootstrap() {
 
   const capabilityService = new CapabilityService({ capabilityStore, executionLogStore, queryLogStore, baseUrl: config.appBaseUrl });
   const mcpServerService = new MpcServerService({ mcpServerStore, capabilityStore, baseUrl: config.appBaseUrl });
-  const schedulerService = new SchedulerService({ mcpServerService, syncIntervalMs: config.mcpSyncIntervalMs, healthIntervalMs: config.mcpHealthIntervalMs });
+  const schedulerService = new SchedulerService({ mcpServerService, messageService: null, syncIntervalMs: config.mcpSyncIntervalMs, healthIntervalMs: config.mcpHealthIntervalMs, deliveryIntervalMs: config.messageDeliveryIntervalMs });
   const mcpCatalogService = new McpCatalogService({ mcpServerService, baseUrl: config.appBaseUrl });
   const dataRepairService = new DataRepairService({ capabilityStore });
   const analyticsService = new AnalyticsService({ capabilityStore, executionLogStore, mcpServerStore, queryLogStore });
   const agentService = new AgentService({ agentStore });
-  const messageService = new MessageService({ agentStore, messageStore });
+  const messageService = new MessageService({ agentStore, messageStore, retryBaseDelayMs: config.messageRetryBaseDelayMs });
+  schedulerService.messageService = messageService;
   const auditService = new AuditService({ auditLogStore });
   const userService = new UserService({ userStore });
 

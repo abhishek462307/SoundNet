@@ -1,9 +1,12 @@
 const crypto = require('crypto');
+const axios = require('axios');
 
 class MessageService {
-  constructor({ agentStore, messageStore }) {
+  constructor({ agentStore, messageStore, deliveryClient, retryBaseDelayMs = 60000 }) {
     this.agentStore = agentStore;
     this.messageStore = messageStore;
+    this.deliveryClient = deliveryClient || createDefaultDeliveryClient();
+    this.retryBaseDelayMs = Number(retryBaseDelayMs || 60000);
   }
 
   async sendMessage(input) {
@@ -20,6 +23,7 @@ class MessageService {
     const threadId = input.thread_id || crypto.randomUUID();
     const maxAttempts = normalizePositiveInteger(input.max_attempts, 3);
     const scheduledFor = normalizeScheduledFor(input.scheduled_for);
+    const deliveryMode = input.delivery_mode || inferDeliveryMode(toAgent);
     const message = {
       id: crypto.randomUUID(),
       thread_id: threadId,
@@ -27,6 +31,7 @@ class MessageService {
       to_agent_id: input.to_agent_id,
       subject: input.subject || null,
       body: input.body,
+      delivery_mode: deliveryMode,
       status: scheduledFor ? 'scheduled' : 'pending',
       attempts: 0,
       max_attempts: maxAttempts,
@@ -90,6 +95,7 @@ class MessageService {
     const processed = [];
 
     for (const message of readyMessages) {
+      const toAgent = await this.agentStore.findById(message.to_agent_id);
       const updatedMessage = {
         ...message,
         attempts: (message.attempts || 0) + 1,
@@ -105,13 +111,29 @@ class MessageService {
         } else {
           updatedMessage.status = 'scheduled';
           updatedMessage.last_error = 'delivery attempt failed';
-          updatedMessage.scheduled_for = new Date(Date.parse(now) + 60 * 1000).toISOString();
+          updatedMessage.scheduled_for = calculateNextRetryAt(now, updatedMessage.attempts, this.retryBaseDelayMs);
         }
       } else {
-        updatedMessage.status = 'delivered';
-        updatedMessage.delivered_at = now;
-        updatedMessage.last_error = null;
-        updatedMessage.scheduled_for = null;
+        try {
+          await this.deliveryClient.deliver({
+            target: toAgent,
+            message: updatedMessage
+          });
+          updatedMessage.status = 'delivered';
+          updatedMessage.delivered_at = now;
+          updatedMessage.last_error = null;
+          updatedMessage.scheduled_for = null;
+        } catch (error) {
+          if (updatedMessage.attempts >= (message.max_attempts || 3)) {
+            updatedMessage.status = 'failed';
+            updatedMessage.last_error = error.message || 'delivery failed after max attempts';
+            updatedMessage.scheduled_for = null;
+          } else {
+            updatedMessage.status = 'scheduled';
+            updatedMessage.last_error = error.message || 'delivery attempt failed';
+            updatedMessage.scheduled_for = calculateNextRetryAt(now, updatedMessage.attempts, this.retryBaseDelayMs);
+          }
+        }
       }
 
       processed.push(await this.messageStore.update(message.id, updatedMessage));
@@ -119,6 +141,45 @@ class MessageService {
 
     return processed;
   }
+}
+
+function calculateNextRetryAt(nowIso, attempts, retryBaseDelayMs) {
+  const multiplier = Math.max(1, 2 ** Math.max(0, attempts - 1));
+  return new Date(Date.parse(nowIso) + (retryBaseDelayMs * multiplier)).toISOString();
+}
+
+function inferDeliveryMode(agent) {
+  if (agent?.protocol === 'webhook') {
+    return 'webhook';
+  }
+
+  return 'http';
+}
+
+function createDefaultDeliveryClient() {
+  return {
+    async deliver({ target, message }) {
+      if (!target?.endpoint) {
+        throw new Error('target endpoint is missing');
+      }
+
+      await axios.post(target.endpoint, {
+        message_id: message.id,
+        thread_id: message.thread_id,
+        from_agent_id: message.from_agent_id,
+        to_agent_id: message.to_agent_id,
+        subject: message.subject,
+        body: message.body,
+        delivery_mode: message.delivery_mode,
+        created_at: message.created_at
+      }, {
+        timeout: 5000,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+  };
 }
 
 function normalizePositiveInteger(value, fallback) {
@@ -162,4 +223,4 @@ function validateMessageInput(input) {
   }
 }
 
-module.exports = { MessageService };
+module.exports = { MessageService, calculateNextRetryAt };

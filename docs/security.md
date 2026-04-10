@@ -56,3 +56,12 @@ Sound Net uses `helmet` for standard HTTP security headers.
 
 ### Rate Limiting
 Sound Net uses `express-rate-limit`.
+
+## Operational Hardening
+
+Sound Net now supports configurable background message delivery processing with retry backoff. For production-style deployments, tune:
+
+- `MESSAGE_DELIVERY_INTERVAL_MS`
+- `MESSAGE_RETRY_BASE_DELAY_MS`
+
+These settings help operators control queue drain behavior and retry pressure on downstream agents.

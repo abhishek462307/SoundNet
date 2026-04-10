@@ -29,6 +29,7 @@ This guide explains the main workflows supported by Sound Net.
 6. Acknowledge receipt with `POST /messages/:messageId/ack`
 7. Inspect the delivery queue with `GET /messages/queue/delivery`
 8. Process scheduled and retryable messages with `POST /messages/queue/process`
+9. Deliver queued webhook or HTTP messages to agent endpoints
 
 ## Operator auth workflow
 
@@ -48,6 +49,7 @@ Use:
 - `GET /analytics/servers`
 - `GET /analytics/top-tools`
 - `GET /analytics/top-queries`
+- `GET /analytics/trends/executions`
 
 These endpoints help operators understand:
 
@@ -55,3 +57,4 @@ These endpoints help operators understand:
 - which servers are healthy
 - what discovery demand looks like
 - how capabilities perform over time
+- how execution behavior changes across time windows

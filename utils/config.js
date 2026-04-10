@@ -8,7 +8,9 @@ function getConfig() {
     adminApiKey: process.env.ADMIN_API_KEY || '',
     rateLimitPerMinute: Number(process.env.RATE_LIMIT_PER_MINUTE || 120),
     mcpHealthIntervalMs: Number(process.env.MCP_HEALTH_INTERVAL_MS || 0),
-    mcpSyncIntervalMs: Number(process.env.MCP_SYNC_INTERVAL_MS || 0)
+    mcpSyncIntervalMs: Number(process.env.MCP_SYNC_INTERVAL_MS || 0),
+    messageDeliveryIntervalMs: Number(process.env.MESSAGE_DELIVERY_INTERVAL_MS || 0),
+    messageRetryBaseDelayMs: Number(process.env.MESSAGE_RETRY_BASE_DELAY_MS || 60000)
   };
 
   validateConfig(config);
@@ -22,6 +24,14 @@ function validateConfig(config) {
 
   if (!Number.isInteger(config.rateLimitPerMinute) || config.rateLimitPerMinute <= 0) {
     throw new Error('RATE_LIMIT_PER_MINUTE must be a positive integer');
+  }
+
+  if (!Number.isInteger(config.messageDeliveryIntervalMs) || config.messageDeliveryIntervalMs < 0) {
+    throw new Error('MESSAGE_DELIVERY_INTERVAL_MS must be a non-negative integer');
+  }
+
+  if (!Number.isInteger(config.messageRetryBaseDelayMs) || config.messageRetryBaseDelayMs <= 0) {
+    throw new Error('MESSAGE_RETRY_BASE_DELAY_MS must be a positive integer');
   }
 
   if (config.nodeEnv === 'production') {

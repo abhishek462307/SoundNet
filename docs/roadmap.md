@@ -27,14 +27,16 @@ Sound Net already includes:
 - threads / conversations foundation
 - acknowledgement flow for agent messages
 - scheduled delivery and retry queue foundation
+- webhook and HTTP endpoint delivery foundation
+- background delivery worker foundation
+- exponential retry backoff foundation
 - realtime delivery
-- webhook delivery
 - delivery workers and webhook retry backoff
 
 ### 3. Analytics upgrades
-- time-window analytics
-- pagination and sorting
-- trend views
+- time-window analytics foundation
+- pagination foundation for analytics listings
+- execution trend views foundation
 - alerting hooks
 
 ### 4. Identity and trust

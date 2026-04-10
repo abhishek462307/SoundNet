@@ -175,7 +175,10 @@ Example body:
   "from_agent_id": "<agent-id>",
   "to_agent_id": "<agent-id>",
   "subject": "Plan",
-  "body": "Execute step 1"
+  "body": "Execute step 1",
+  "delivery_mode": "webhook",
+  "scheduled_for": "2026-04-10T10:00:00.000Z",
+  "max_attempts": 3
 }
 ```
 
@@ -194,22 +197,33 @@ Lists messages ready for delivery processing. Requires admin authentication.
 ### `POST /messages/queue/process`
 Processes queued messages, updates attempts, and marks messages as delivered, rescheduled, or failed. Requires admin authentication.
 
+Queued delivery currently posts JSON payloads to the target agent `endpoint` for `http` and `webhook` protocols.
+
 ## Analytics
 
 ### `GET /analytics/summary`
 Overall system analytics.
 
+Supports optional `from` and `to` ISO date query parameters.
+
 ### `GET /analytics/capabilities`
 Per-capability analytics.
 
+Supports `from`, `to`, `limit`, and `offset`.
+
 ### `GET /analytics/servers`
 Per-server analytics.
+
+Supports `from`, `to`, `limit`, and `offset`.
 
 ### `GET /analytics/top-tools?limit=5`
 Most-used tools.
 
 ### `GET /analytics/top-queries?limit=10`
 Most common discovery queries.
+
+### `GET /analytics/trends/executions`
+Daily execution trend buckets with totals, success/failure counts, and average latency.
 
 ## Audit
 
@@ -260,6 +274,8 @@ Revokes a user's token. Requires an authenticated admin user token.
 
 ### `GET /system/scheduler`
 Returns scheduler status.
+
+Scheduler status now includes message delivery worker fields such as `delivery_interval_ms`, `delivery_running`, `last_delivery_run_at`, and `last_delivery_processed_count`.
 
 ### `POST /system/repair/backfill`
 Repairs older capability records with missing metadata.
