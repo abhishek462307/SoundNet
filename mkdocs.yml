@@ -1,0 +1,14 @@
+site_name: Sound Net
+site_description: Service Orchestration Unified Network for Discovery, Navigation, Execution, and Transport
+repo_name: sound-net
+nav:
+  - Home: docs/index.md
+  - Getting Started: docs/getting-started.md
+  - API Workflows: docs/api-workflows.md
+  - API Reference: docs/api-reference.md
+  - Architecture: docs/architecture.md
+  - Security: docs/security.md
+  - Roadmap: docs/roadmap.md
+  - FAQ: docs/faq.md
+  - Glossary: docs/glossary.md
+  - Deployment: docs/deployment.md

@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: sound-net
+    env: docker
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_BASE_URL
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: ADMIN_API_KEY
+        sync: false
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 120
+      - key: MCP_HEALTH_INTERVAL_MS
+        value: 30000
+      - key: MCP_SYNC_INTERVAL_MS
+        value: 60000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sound-net-postgres
+          property: connectionString
+
+databases:
+  - name: sound-net-postgres
+    plan: starter

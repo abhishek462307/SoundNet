@@ -1,0 +1,100 @@
+{
+  "info": {
+    "name": "Agent Network MVP",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "List Capabilities",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/capabilities",
+          "host": ["{{baseUrl}}"],
+          "path": ["capabilities"]
+        }
+      }
+    },
+    {
+      "name": "List MCP Servers",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/mcp/servers",
+          "host": ["{{baseUrl}}"],
+          "path": ["mcp", "servers"]
+        }
+      }
+    },
+    {
+      "name": "Discover Capability",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"order food public\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/discover",
+          "host": ["{{baseUrl}}"],
+          "path": ["discover"]
+        }
+      }
+    },
+    {
+      "name": "Execute Capability",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"capability_id\": \"{{capabilityId}}\",\n  \"payload\": {\n    \"item\": \"pizza\",\n    \"quantity\": 1\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/execute",
+          "host": ["{{baseUrl}}"],
+          "path": ["execute"]
+        }
+      }
+    },
+    {
+      "name": "Register MCP Server",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"partner_public_mcp\",\n  \"description\": \"Trusted public MCP server\",\n  \"endpoint\": \"{{baseUrl}}/mock-mcp\",\n  \"transport\": \"http\",\n  \"auth_type\": \"none\",\n  \"trust_score\": 0.9,\n  \"tags\": [\"public\", \"mcp\", \"trusted\"]\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/mcp/servers",
+          "host": ["{{baseUrl}}"],
+          "path": ["mcp", "servers"]
+        }
+      }
+    },
+    {
+      "name": "Sync MCP Server",
+      "request": {
+        "method": "POST",
+        "url": {
+          "raw": "{{baseUrl}}/mcp/servers/{{serverId}}/sync",
+          "host": ["{{baseUrl}}"],
+          "path": ["mcp", "servers", "{{serverId}}", "sync"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:3000" },
+    { "key": "capabilityId", "value": "" },
+    { "key": "serverId", "value": "" }
+  ]
+}

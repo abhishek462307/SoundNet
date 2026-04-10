@@ -1,0 +1,30 @@
+{
+  "name": "sound-net",
+  "version": "1.0.0",
+  "description": "Service Orchestration Unified Network for Discovery, Navigation, Execution, and Transport",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "db:bootstrap": "node scripts/bootstrap-db.js"
+  },
+  "keywords": [
+    "agent-network",
+    "discovery",
+    "execution",
+    "mcp"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.11.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.3.2",
+    "helmet": "^8.1.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10",
+    "supertest": "^7.1.4"
+  }
+}
