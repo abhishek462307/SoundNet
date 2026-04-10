@@ -19,6 +19,12 @@ This guide explains the main workflows supported by Sound Net.
    - `PATCH /mcp/servers/:serverId/disable`
    - `PATCH /mcp/servers/:serverId/enable`
 
+## MCP catalog workflow
+
+1. Inspect curated MCP providers with `GET /catalog/mcp`
+2. Seed directly supported entries with `POST /catalog/mcp/seed`
+3. Review manual-setup entries for providers that require credentials, OAuth, stdio transport, or separate deployment
+
 ## Agent workflow
 
 1. Register an agent with `POST /agents/register`
@@ -40,6 +46,17 @@ This guide explains the main workflows supported by Sound Net.
 5. Rotate a credential with `POST /users/:userId/rotate-token`
 6. Revoke a credential with `POST /users/:userId/revoke-token`
 
+## Tenant workflow
+
+1. Choose a tenant id and pass `x-tenant-id`
+2. Register users, agents, and messages inside that tenant
+3. Use a tenant-bound user token for admin access inside the same tenant
+4. Query agents and message queues per tenant boundary
+
+This is a foundation layer and does not yet fully isolate every data model.
+
+Capabilities, MCP server operations, and analytics queries now participate in the tenant boundary as well.
+
 ## Analytics workflow
 
 Use:
@@ -50,6 +67,7 @@ Use:
 - `GET /analytics/top-tools`
 - `GET /analytics/top-queries`
 - `GET /analytics/trends/executions`
+- `GET /analytics/policy`
 
 These endpoints help operators understand:
 
@@ -58,3 +76,6 @@ These endpoints help operators understand:
 - what discovery demand looks like
 - how capabilities perform over time
 - how execution behavior changes across time windows
+- how budget usage and autonomy modes evolve over time
+
+`GET /analytics/policy` is the policy-focused view. It surfaces rolling 24h and 7d spend, plus execution counts grouped by autonomy mode so operators can tune tenant guardrails.

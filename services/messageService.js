@@ -31,6 +31,7 @@ class MessageService {
       to_agent_id: input.to_agent_id,
       subject: input.subject || null,
       body: input.body,
+      tenant_id: input.tenant_id || 'default',
       delivery_mode: deliveryMode,
       status: scheduledFor ? 'scheduled' : 'pending',
       attempts: 0,
@@ -46,7 +47,7 @@ class MessageService {
     return this.messageStore.create(message);
   }
 
-  async inbox(agentId) {
+  async inbox(agentId, options = {}) {
     const agent = await this.agentStore.findById(agentId);
     if (!agent) {
       const error = new Error('agentId not found');
@@ -54,17 +55,17 @@ class MessageService {
       throw error;
     }
 
-    return this.messageStore.listForAgent(agentId);
+    return filterMessagesByTenant(await this.messageStore.listForAgent(agentId), options.tenant_id);
   }
 
-  async getThread(threadId) {
+  async getThread(threadId, options = {}) {
     if (!threadId) {
       const error = new Error('threadId is required');
       error.status = 400;
       throw error;
     }
 
-    return this.messageStore.listByThread(threadId);
+    return filterMessagesByTenant(await this.messageStore.listByThread(threadId), options.tenant_id);
   }
 
   async acknowledgeMessage(messageId) {
@@ -84,14 +85,14 @@ class MessageService {
     return this.messageStore.update(messageId, updatedMessage);
   }
 
-  async listDeliveryQueue(beforeIso) {
+  async listDeliveryQueue(beforeIso, options = {}) {
     const effectiveBefore = beforeIso || new Date().toISOString();
-    return this.messageStore.listReadyForDelivery(effectiveBefore);
+    return filterMessagesByTenant(await this.messageStore.listReadyForDelivery(effectiveBefore), options.tenant_id);
   }
 
   async processDeliveryQueue(options = {}) {
     const now = options.now || new Date().toISOString();
-    const readyMessages = await this.messageStore.listReadyForDelivery(now);
+    const readyMessages = filterMessagesByTenant(await this.messageStore.listReadyForDelivery(now), options.tenant_id);
     const processed = [];
 
     for (const message of readyMessages) {
@@ -221,6 +222,10 @@ function validateMessageInput(input) {
       throw error;
     }
   }
+}
+
+function filterMessagesByTenant(messages, tenantId) {
+  return messages.filter((message) => (message.tenant_id || 'default') === (tenantId || 'default'));
 }
 
 module.exports = { MessageService, calculateNextRetryAt };

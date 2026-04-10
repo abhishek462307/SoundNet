@@ -57,12 +57,13 @@ class MpcServerService {
       last_health_latency_ms: Date.now() - startedAt,
       last_error: null,
       protocol_version: handshake.protocolVersion || null,
-      server_info: handshake.serverInfo || null
+      server_info: handshake.serverInfo || null,
+      tenant_id: input.tenant_id || 'default'
     });
   }
 
-  async listServers(filters = {}) {
-    return this.mcpServerStore.list(filters);
+  async listServers(filters = {}, options = {}) {
+    return filterByTenant(await this.mcpServerStore.list(filters), options.tenant_id);
   }
 
   async syncServer(serverId) {
@@ -154,13 +155,13 @@ class MpcServerService {
     }
   }
 
-  async syncAllServers() {
-    const servers = await this.mcpServerStore.list({ trustedOnly: true, allowSyncOnly: true });
+  async syncAllServers(options = {}) {
+    const servers = filterByTenant(await this.mcpServerStore.list({ trustedOnly: true, allowSyncOnly: true }), options.tenant_id);
     const results = [];
 
     for (const server of servers) {
       try {
-        const result = await this.syncServer(server.id);
+        const result = await this.syncServer(server.id, options);
         results.push({ server_id: server.id, ok: true, imported_count: result.imported_count, stale_count: result.stale_count });
       } catch (error) {
         results.push({ server_id: server.id, ok: false, error: error.message });
@@ -199,12 +200,12 @@ class MpcServerService {
     }
   }
 
-  async checkAllServerHealth() {
-    const servers = await this.mcpServerStore.list({ publicOnly: true });
+  async checkAllServerHealth(options = {}) {
+    const servers = filterByTenant(await this.mcpServerStore.list({ publicOnly: true }), options.tenant_id);
     const results = [];
 
     for (const server of servers) {
-      const result = await this.checkServerHealth(server.id);
+      const result = await this.checkServerHealth(server.id, options);
       results.push({
         server_id: result.id,
         name: result.name,
@@ -326,6 +327,10 @@ class MpcServerService {
       last_error: error.message
     });
   }
+}
+
+function filterByTenant(items, tenantId) {
+  return items.filter((item) => (item.tenant_id || 'default') === (tenantId || 'default'));
 }
 
 function inferCategoryFromTool(tool) {

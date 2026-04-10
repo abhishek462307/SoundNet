@@ -11,6 +11,7 @@ const agentsFile = path.join(dataDir, 'agents.json');
 const messagesFile = path.join(dataDir, 'messages.json');
 const auditLogsFile = path.join(dataDir, 'audit-logs.json');
 const usersFile = path.join(dataDir, 'users.json');
+const tenantPoliciesFile = path.join(dataDir, 'tenant-policies.json');
 
 let dbAdapterPromise;
 
@@ -23,7 +24,7 @@ async function createDbAdapter() {
 
 async function createFileAdapter() {
   await fs.promises.mkdir(dataDir, { recursive: true });
-  await Promise.all([ensureJsonFile(capabilitiesFile), ensureJsonFile(logsFile), ensureJsonFile(mcpServersFile), ensureJsonFile(queryLogsFile), ensureJsonFile(agentsFile), ensureJsonFile(messagesFile), ensureJsonFile(auditLogsFile), ensureJsonFile(usersFile)]);
+  await Promise.all([ensureJsonFile(capabilitiesFile), ensureJsonFile(logsFile), ensureJsonFile(mcpServersFile), ensureJsonFile(queryLogsFile), ensureJsonFile(agentsFile), ensureJsonFile(messagesFile), ensureJsonFile(auditLogsFile), ensureJsonFile(usersFile), ensureJsonFile(tenantPoliciesFile)]);
 
   return {
     async insertCapability(x){const items=await readJson(capabilitiesFile);items.push(x);await writeJson(capabilitiesFile,items);return x;}, async updateCapability(id,x){const items=await readJson(capabilitiesFile);const next=items.map(v=>v.id===id?x:v);await writeJson(capabilitiesFile,next);return x;}, async listCapabilities(){return readJson(capabilitiesFile);}, async findCapabilityById(id){return (await readJson(capabilitiesFile)).find(v=>v.id===id)||null;}, async findCapabilityByName(name){return (await readJson(capabilitiesFile)).find(v=>v.name===name)||null;}, async deleteCapabilityById(id){const items=await readJson(capabilitiesFile);const next=items.filter(v=>v.id!==id);await writeJson(capabilitiesFile,next);return items.length-next.length;}, async deleteCapabilitiesBySourceServerId(sourceServerId){const items=await readJson(capabilitiesFile);const next=items.filter(v=>v.source_server_id!==sourceServerId);await writeJson(capabilitiesFile,next);return items.length-next.length;},
@@ -33,7 +34,7 @@ async function createFileAdapter() {
     async insertAgent(x){const items=await readJson(agentsFile);items.push(x);await writeJson(agentsFile,items);return x;}, async updateAgent(id,x){const items=await readJson(agentsFile);const next=items.map(v=>v.id===id?x:v);await writeJson(agentsFile,next);return x;}, async listAgents(){return readJson(agentsFile);}, async findAgentById(id){return (await readJson(agentsFile)).find(v=>v.id===id)||null;}, async findAgentByName(name){return (await readJson(agentsFile)).find(v=>v.name===name)||null;},
     async insertMessage(x){const items=await readJson(messagesFile);items.unshift(x);await writeJson(messagesFile,items.slice(0,500));return x;}, async updateMessage(id,x){const items=await readJson(messagesFile);const next=items.map(v=>v.id===id?x:v);await writeJson(messagesFile,next);return x;}, async findMessageById(id){return (await readJson(messagesFile)).find(v=>v.id===id)||null;}, async listMessagesForAgent(agentId){return (await readJson(messagesFile)).filter(v=>v.to_agent_id===agentId);}, async listMessagesByThread(threadId){return (await readJson(messagesFile)).filter(v=>v.thread_id===threadId).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));}, async listMessagesReadyForDelivery(beforeIso){return (await readJson(messagesFile)).filter((message)=>{ if (['delivered','acknowledged','failed'].includes(message.status)) return false; if (!message.scheduled_for) return true; return Date.parse(message.scheduled_for) <= Date.parse(beforeIso); }).sort((a,b)=> new Date(a.created_at)-new Date(b.created_at));},
     async insertAuditLog(x){const items=await readJson(auditLogsFile);items.unshift(x);await writeJson(auditLogsFile,items.slice(0,500));return x;}, async listAuditLogs(){return readJson(auditLogsFile);},
-    async insertUser(x){const items=await readJson(usersFile);items.push(x);await writeJson(usersFile,items);return x;}, async updateUser(id,x){const items=await readJson(usersFile);const next=items.map(v=>v.id===id?x:v);await writeJson(usersFile,next);return x;}, async listUsers(){return readJson(usersFile);}, async findUserById(id){return (await readJson(usersFile)).find(v=>v.id===id)||null;}, async findUserByEmail(email){return (await readJson(usersFile)).find(v=>v.email===email)||null;}, async findUserByToken(token){const hashed = require('../services/userService').hashToken(token); return (await readJson(usersFile)).find(v=>(v.api_token_hash||v.api_token)===hashed)||null;}
+    async insertUser(x){const items=await readJson(usersFile);items.push(x);await writeJson(usersFile,items);return x;}, async updateUser(id,x){const items=await readJson(usersFile);const next=items.map(v=>v.id===id?x:v);await writeJson(usersFile,next);return x;}, async listUsers(){return readJson(usersFile);}, async findUserById(id){return (await readJson(usersFile)).find(v=>v.id===id)||null;}, async findUserByEmail(email){return (await readJson(usersFile)).find(v=>v.email===email)||null;}, async findUserByToken(token){const hashed = require('../services/userService').hashToken(token); return (await readJson(usersFile)).find(v=>(v.api_token_hash||v.api_token)===hashed)||null;}, async listTenantPolicies(){return readJson(tenantPoliciesFile);}, async upsertTenantPolicy(policy){const items=await readJson(tenantPoliciesFile);const existingIndex=items.findIndex(v=>v.tenant_id===policy.tenant_id); if(existingIndex>=0){items[existingIndex]=policy;} else {items.push(policy);} await writeJson(tenantPoliciesFile,items); return policy;}, async findTenantPolicyByTenantId(tenantId){return (await readJson(tenantPoliciesFile)).find(v=>v.tenant_id===tenantId)||null;}
   };
 }
 
@@ -59,6 +60,21 @@ function normalizeMcpServerRow(row){return {...row,tags:Array.isArray(row.tags)?
 function normalizeAgentRow(row){return {...row,tags:Array.isArray(row.tags)?row.tags:JSON.parse(row.tags),capabilities:Array.isArray(row.capabilities)?row.capabilities:JSON.parse(row.capabilities)}}
 function applyServerFilters(servers,filters){return servers.filter((server)=>{if(filters.publicOnly&&!server.is_public)return false; if(filters.trustedOnly&&!server.is_trusted)return false; if(filters.allowSyncOnly&&!server.allow_sync)return false; if(filters.status&&server.status!==filters.status)return false; return true;})}
 async function ensureJsonFile(file){try{await fs.promises.access(file);}catch{await fs.promises.writeFile(file,'[]\n');}}
-async function readJson(file){return JSON.parse(await fs.promises.readFile(file,'utf8'));}
+async function readJson(file){
+  const raw = await fs.promises.readFile(file,'utf8');
+  const text = String(raw || '').trim();
+
+  if (!text) {
+    await writeJson(file, []);
+    return [];
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    await writeJson(file, []);
+    return [];
+  }
+}
 async function writeJson(file,value){await fs.promises.writeFile(file,`${JSON.stringify(value,null,2)}\n`);}
 module.exports = { createDbAdapter };

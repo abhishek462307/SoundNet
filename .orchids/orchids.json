@@ -3,7 +3,8 @@
   "createdAt": 1775774749129,
   "version": "1.0",
   "startupCommands": [
-    "npm install; npm run dev"
+    "npm install; npm run dev",
+    "cd web && npm install; npm run dev -- --host 0.0.0.0"
   ],
   "templateId": "auto"
 }

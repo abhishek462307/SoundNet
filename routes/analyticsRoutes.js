@@ -15,6 +15,7 @@ module.exports = function analyticsRoutes({ analyticsService }) {
   router.get('/top-tools', analyticsController.getTopTools);
   router.get('/top-queries', analyticsController.getTopQueries);
   router.get('/trends/executions', analyticsController.getExecutionTrends);
+  router.get('/policy', analyticsController.getPolicyAnalytics);
 
   return router;
 };

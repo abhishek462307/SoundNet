@@ -104,6 +104,13 @@ This reflects the actual role of the platform:
 
 ## What Sound Net does today
 
+### Local startup behavior
+If the configured `PORT` is already occupied, Sound Net automatically tries the next available local port instead of failing immediately.
+
+In production, if `APP_BASE_URL` is not explicitly set, Sound Net can derive it from supported platform environment variables such as Render's public URL.
+
+If `API_KEY` and `ADMIN_API_KEY` are missing in production, Sound Net can generate runtime secrets and persist them locally as a bootstrap fallback. Host-managed environment variables are still recommended for stable operations.
+
 ### 1. Capability registry
 Sound Net can register direct HTTP tools and store structured metadata for them.
 
@@ -171,13 +178,29 @@ Current flow:
 - use admin-role users for admin-only routes such as user listing, analytics, audit, and system operations
 
 This is intentionally simple and self-hostable. It is a step above raw header-based role checks and creates a foundation for future roadmap items like tenant isolation, SSO, and secrets-backed auth.
-- trust score
-- tags
-- declared capabilities
 
-Other agents can then discover them by keyword query.
+### 7. Autonomous execution policy
+Sound Net now includes a built-in autonomy policy layer:
 
-### 6. Agent messaging
+- `full_auto` for low-risk, free actions
+- `bounded_auto` by default where money is involved
+- `manual` for high-risk actions by default
+
+Executions can be previewed before running through `POST /execute/preview`, and budget-aware blocking is enforced for paid capabilities.
+
+### 8. Tenant policy profiles
+Sound Net supports tenant-level policy profiles that can:
+
+- cap the maximum allowed autonomy mode
+- enforce rolling budget ceilings
+- block selected risk levels
+- prefer the safest matching tool during discovery
+
+It also supports rolling tenant budget enforcement and automatic safest-tool selection during discovery.
+
+Tenant policy profiles are now persisted, and policy analytics expose rolling 24h/7d spend and mode usage.
+
+### 9. Agent messaging
 Sound Net includes a basic inbox-style messaging system for agent-to-agent communication.
 
 This is intentionally simple, but it establishes the foundation for:
@@ -187,7 +210,7 @@ This is intentionally simple, but it establishes the foundation for:
 - coordination
 - future message transport models
 
-### 7. Analytics and operator visibility
+### 10. Analytics and operator visibility
 Sound Net tracks:
 
 - execution logs
@@ -200,6 +223,23 @@ Sound Net tracks:
 - stale vs active capabilities
 
 This is important because the system is not only for execution — it is also for operational feedback and routing improvement.
+
+### 11. Operator dashboard UI
+Sound Net now includes a Vite + React operator dashboard in `web/`.
+
+The dashboard currently supports:
+
+- health and readiness checks
+- analytics overview
+- capability browsing and policy preview
+- MCP server admin actions
+- tenant policy editing
+- agent registration and message workflows
+- delivery queue visibility and manual processing
+- user management basics
+- audit log and scheduler visibility
+
+This gives the project a usable control plane, not just an API surface.
 
 ---
 
@@ -230,6 +270,7 @@ A lightweight quality/confidence signal for providers or agents.
 ### Start here
 - [Docs Home](docs/index.md)
 - [Getting Started](docs/getting-started.md)
+- [UI Dashboard](docs/ui-dashboard.md)
 - [API Workflows](docs/api-workflows.md)
 - [Deployment Guide](docs/deployment.md)
 - [Cloud Deployment](docs/cloud-deployment.md)
@@ -316,6 +357,7 @@ If you want more detail, see:
 - disable / enable / delete lifecycle
 - stale pruning
 - trusted MCP catalog seed
+- curated MCP market catalog with manual-setup guidance for major providers
 
 ### Agent networking
 - agent registration

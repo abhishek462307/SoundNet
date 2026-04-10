@@ -1,0 +1,22 @@
+{
+  "watch": [
+    "server.js",
+    "app.js",
+    "controllers",
+    "middleware",
+    "models",
+    "routes",
+    "services",
+    "utils"
+  ],
+  "ignore": [
+    "data/*",
+    "coverage/*",
+    "docs/*",
+    "examples/*",
+    ".git/*",
+    "nohup.out",
+    "/tmp/*"
+  ],
+  "ext": "js,mjs,cjs,json"
+}

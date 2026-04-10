@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
 const { createApp } = require('../app');
+const { getRuntimeConfig } = require('../utils/runtimeConfig');
 const { CapabilityService } = require('../services/capabilityService');
 const { MpcServerService } = require('../services/mcpServerService');
 const { SchedulerService } = require('../services/schedulerService');
@@ -14,6 +15,7 @@ const { AuditService } = require('../services/auditService');
 const { UserService } = require('../services/userService');
 const { hashToken } = require('../services/userService');
 const { calculateNextRetryAt } = require('../services/messageService');
+const { TenantPolicyService } = require('../services/tenantPolicyService');
 
 function createMemoryStore() {
   const capabilities = []; const logs = []; const servers = []; const queries = []; const agents = []; const messages = []; const audits = []; const users = [];
@@ -46,7 +48,8 @@ function createMemoryStore() {
 async function buildTestHarness() {
   const stores = createMemoryStore();
   const delivered = [];
-  const capabilityService = new CapabilityService({ capabilityStore: stores.capabilityStore, executionLogStore: stores.executionLogStore, queryLogStore: stores.queryLogStore, baseUrl: 'http://127.0.0.1:0' });
+  const tenantPolicyService = new TenantPolicyService();
+  const capabilityService = new CapabilityService({ capabilityStore: stores.capabilityStore, executionLogStore: stores.executionLogStore, queryLogStore: stores.queryLogStore, baseUrl: 'http://127.0.0.1:0', tenantPolicyService });
   const mcpServerService = new MpcServerService({ mcpServerStore: stores.mcpServerStore, capabilityStore: stores.capabilityStore, baseUrl: 'http://127.0.0.1:0' });
   const schedulerService = new SchedulerService({ mcpServerService });
   const mcpCatalogService = new McpCatalogService({ mcpServerService, baseUrl: 'http://127.0.0.1:0' });
@@ -66,12 +69,59 @@ async function buildTestHarness() {
   const auditService = new AuditService({ auditLogStore: stores.auditLogStore });
   const userService = new UserService({ userStore: stores.userStore });
   const readinessState = { ready: true };
-  const app = createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, userService, readinessState });
+  const app = createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, userService, tenantPolicyService, readinessState });
   const server = await new Promise((resolve, reject) => { const instance = app.listen(0, ()=>resolve(instance)); instance.on('error', reject); });
-  return { app, server, stores, delivered };
+  return { app, server, stores, delivered, tenantPolicyService };
 }
 
 async function closeServer(server){ await new Promise((resolve,reject)=>server.close(err=>err?reject(err):resolve())); }
+
+test('production runtime config can derive app base url and generate secrets', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousRenderUrl = process.env.RENDER_EXTERNAL_URL;
+  const previousApiKey = process.env.API_KEY;
+  const previousAdminApiKey = process.env.ADMIN_API_KEY;
+
+  try {
+    process.env.NODE_ENV = 'production';
+    process.env.RENDER_EXTERNAL_URL = 'https://sound-net.onrender.com';
+    delete process.env.API_KEY;
+    delete process.env.ADMIN_API_KEY;
+
+    const runtimeConfig = await getRuntimeConfig({
+      nodeEnv: 'production',
+      appBaseUrl: '',
+      apiKey: '',
+      adminApiKey: ''
+    });
+
+    assert.equal(runtimeConfig.appBaseUrl, 'https://sound-net.onrender.com');
+    assert.equal(typeof runtimeConfig.apiKey, 'string');
+    assert.equal(typeof runtimeConfig.adminApiKey, 'string');
+    assert.equal(runtimeConfig.apiKey.startsWith('sn_api_'), true);
+    assert.equal(runtimeConfig.adminApiKey.startsWith('sn_admin_'), true);
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
+    if (previousRenderUrl === undefined) delete process.env.RENDER_EXTERNAL_URL; else process.env.RENDER_EXTERNAL_URL = previousRenderUrl;
+    if (previousApiKey === undefined) delete process.env.API_KEY; else process.env.API_KEY = previousApiKey;
+    if (previousAdminApiKey === undefined) delete process.env.ADMIN_API_KEY; else process.env.ADMIN_API_KEY = previousAdminApiKey;
+  }
+});
+
+test('errors include request id for traceability', async () => {
+  const app = createApp({
+    readinessState: { ready: true },
+    runtimeConfig: { apiKey: '', adminApiKey: '' }
+  });
+
+  const response = await request(app)
+    .get('/users')
+    .set('x-request-id', 'req-test-123');
+
+  assert.equal(response.status, 401);
+  assert.equal(response.body.request_id, 'req-test-123');
+  assert.equal(response.headers['x-request-id'], 'req-test-123');
+});
 
 test('admin-protected MCP route returns 403 with wrong admin key', async () => {
   process.env.ADMIN_API_KEY = 'secret-admin';
@@ -425,6 +475,282 @@ test('analytics supports time windows, pagination, and trends', async () => {
     assert.equal(trends.body[1].bucket, '2026-04-10');
   } finally {
     delete process.env.ADMIN_API_KEY;
+    await closeServer(server);
+  }
+});
+
+test('tenant header scopes users, agents, and messages', async () => {
+  process.env.ADMIN_API_KEY = 'secret-admin';
+  const { app, server } = await buildTestHarness();
+  try {
+    const alphaAdmin = await request(app)
+      .post('/users/register')
+      .set('x-tenant-id', 'alpha')
+      .send({ name: 'Alpha Admin', email: 'alpha-admin@soundnet.dev', role: 'admin' });
+
+    const betaAdmin = await request(app)
+      .post('/users/register')
+      .set('x-tenant-id', 'beta')
+      .send({ name: 'Beta Admin', email: 'beta-admin@soundnet.dev', role: 'admin' });
+
+    const alphaUsers = await request(app)
+      .get('/users')
+      .set('x-user-token', alphaAdmin.body.api_token)
+      .set('x-tenant-id', 'alpha');
+
+    assert.equal(alphaUsers.status, 200);
+    assert.equal(alphaUsers.body.length, 1);
+    assert.equal(alphaUsers.body[0].tenant_id, 'alpha');
+
+    await request(app)
+      .post('/agents/register')
+      .set('x-tenant-id', 'alpha')
+      .send({ name: 'alpha-agent', description: 'alpha', endpoint: 'http://alpha.local' });
+
+    await request(app)
+      .post('/agents/register')
+      .set('x-tenant-id', 'beta')
+      .send({ name: 'beta-agent', description: 'beta', endpoint: 'http://beta.local' });
+
+    const alphaAgents = await request(app)
+      .get('/agents')
+      .set('x-tenant-id', 'alpha');
+
+    assert.equal(alphaAgents.status, 200);
+    assert.equal(alphaAgents.body.length, 1);
+    assert.equal(alphaAgents.body[0].name, 'alpha-agent');
+
+    const alphaReceiver = await request(app)
+      .post('/agents/register')
+      .set('x-tenant-id', 'alpha')
+      .send({ name: 'alpha-receiver', description: 'alpha receiver', endpoint: 'http://alpha-receiver.local' });
+
+    const alphaMessage = await request(app)
+      .post('/messages')
+      .set('x-tenant-id', 'alpha')
+      .send({ from_agent_id: alphaAgents.body[0].id, to_agent_id: alphaReceiver.body.id, body: 'hello alpha' });
+
+    assert.equal(alphaMessage.status, 201);
+    assert.equal(alphaMessage.body.tenant_id, 'alpha');
+
+    const betaQueue = await request(app)
+      .get('/messages/queue/delivery')
+      .set('x-admin-key', 'secret-admin')
+      .set('x-tenant-id', 'beta');
+
+    assert.equal(betaQueue.status, 200);
+    assert.equal(betaQueue.body.length, 0);
+
+    assert.equal(betaAdmin.body.tenant_id, 'beta');
+  } finally {
+    delete process.env.ADMIN_API_KEY;
+    await closeServer(server);
+  }
+});
+
+test('tenant header scopes capabilities, mcp servers, and analytics', async () => {
+  process.env.ADMIN_API_KEY = 'secret-admin';
+  const { app, server, stores } = await buildTestHarness();
+  try {
+    await stores.capabilityStore.create({
+      id: 'alpha-cap',
+      name: 'alpha_tool',
+      description: 'Alpha tool',
+      endpoint: 'http://alpha-tool.local',
+      method: 'POST',
+      input_schema: { type: 'object' },
+      output_schema: { type: 'object' },
+      auth_type: 'none',
+      tags: ['alpha'],
+      provider: 'alpha',
+      category: 'ops',
+      source_type: 'http',
+      status: 'active',
+      tenant_id: 'alpha'
+    });
+
+    const betaCapabilities = await request(app)
+      .get('/capabilities')
+      .set('x-tenant-id', 'beta');
+
+    assert.equal(betaCapabilities.status, 200);
+    assert.equal(betaCapabilities.body.some((item) => item.name === 'alpha_tool'), false);
+
+    const alphaCapabilities = await request(app)
+      .get('/capabilities')
+      .set('x-tenant-id', 'alpha');
+
+    assert.equal(alphaCapabilities.status, 200);
+    assert.equal(alphaCapabilities.body.some((item) => item.name === 'alpha_tool'), true);
+
+    await stores.mcpServerStore.create({ id: 'srv-alpha', name: 'alpha-mcp', description: 'alpha', endpoint: 'http://alpha-mcp.local', transport: 'http', auth_type: 'none', trust_score: 0.5, tags: [], status: 'healthy', is_public: true, is_trusted: true, allow_sync: true, tenant_id: 'alpha' });
+    await stores.mcpServerStore.create({ id: 'srv-beta', name: 'beta-mcp', description: 'beta', endpoint: 'http://beta-mcp.local', transport: 'http', auth_type: 'none', trust_score: 0.5, tags: [], status: 'healthy', is_public: true, is_trusted: true, allow_sync: true, tenant_id: 'beta' });
+
+    const alphaServers = await request(app)
+      .get('/mcp/servers')
+      .set('x-tenant-id', 'alpha');
+
+    assert.equal(alphaServers.status, 200);
+    assert.equal(alphaServers.body.length, 1);
+    assert.equal(alphaServers.body[0].name, 'alpha-mcp');
+
+    await stores.executionLogStore.create({ id: 'alpha-log', capability_id: 'alpha-cap', success: true, latency_ms: 100, tenant_id: 'alpha', created_at: '2026-04-10T12:00:00.000Z' });
+    await stores.executionLogStore.create({ id: 'beta-log', capability_id: 'other-cap', success: true, latency_ms: 50, tenant_id: 'beta', created_at: '2026-04-10T12:00:00.000Z' });
+    await stores.queryLogStore.create({ id: 'alpha-query', query: 'alpha', filters: {}, result_count: 1, tenant_id: 'alpha', created_at: '2026-04-10T12:00:00.000Z' });
+
+    const alphaSummary = await request(app)
+      .get('/analytics/summary')
+      .set('x-admin-key', 'secret-admin')
+      .set('x-tenant-id', 'alpha');
+
+    assert.equal(alphaSummary.status, 200);
+    assert.equal(alphaSummary.body.total_executions, 1);
+    assert.equal(alphaSummary.body.total_queries, 1);
+  } finally {
+    delete process.env.ADMIN_API_KEY;
+    await closeServer(server);
+  }
+});
+
+test('paid capabilities default to bounded_auto and respect budget policy', async () => {
+  const { app, server, stores } = await buildTestHarness();
+  try {
+    await stores.capabilityStore.create({
+      id: 'paid-cap',
+      name: 'book_flight',
+      description: 'Book a flight',
+      endpoint: 'http://tool.local/book-flight',
+      method: 'POST',
+      input_schema: {},
+      output_schema: {},
+      auth_type: 'api_key',
+      tags: ['travel', 'paid'],
+      source_type: 'http',
+      status: 'active',
+      provider: 'travelco',
+      category: 'travel',
+      tenant_id: 'default',
+      cost_class: 'paid',
+      estimated_cost_usd: 25,
+      risk_level: 'medium',
+      execution_mode_default: 'bounded_auto'
+    });
+
+    const preview = await request(app)
+      .post('/execute/preview')
+      .send({ capability_id: 'paid-cap', payload: {}, budget_limit_usd: 100 });
+
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.policy.execution_mode, 'bounded_auto');
+    assert.equal(preview.body.policy.estimated_cost_usd, 25);
+
+    const blocked = await request(app)
+      .post('/execute')
+      .send({ capability_id: 'paid-cap', payload: {}, budget_limit_usd: 10 });
+
+    assert.equal(blocked.status, 403);
+    assert.equal(blocked.body.policy.execution_mode, 'bounded_auto');
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('high-risk capabilities cannot run in full_auto', async () => {
+  const { app, server, stores } = await buildTestHarness();
+  try {
+    await stores.capabilityStore.create({
+      id: 'danger-cap',
+      name: 'delete_production_data',
+      description: 'Delete production data',
+      endpoint: 'http://tool.local/delete',
+      method: 'POST',
+      input_schema: {},
+      output_schema: {},
+      auth_type: 'none',
+      tags: ['danger'],
+      source_type: 'http',
+      status: 'active',
+      provider: 'internal',
+      category: 'ops',
+      tenant_id: 'default',
+      cost_class: 'free',
+      estimated_cost_usd: 0,
+      risk_level: 'high',
+      execution_mode_default: 'manual'
+    });
+
+    const blocked = await request(app)
+      .post('/execute/preview')
+      .send({ capability_id: 'danger-cap', payload: {}, execution_mode: 'full_auto' });
+
+    assert.equal(blocked.status, 403);
+    assert.equal(blocked.body.policy.reasons.includes('high_risk_capability'), true);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test('tenant policy can lower max execution mode and enforce rolling budget', async () => {
+  process.env.ADMIN_API_KEY = 'secret-admin';
+  const { app, server, stores, tenantPolicyService } = await buildTestHarness();
+  try {
+    tenantPolicyService.setPolicy('default', {
+      max_execution_mode: 'bounded_auto',
+      rolling_budget_limit_usd: 30,
+      blocked_risk_levels: ['high']
+    });
+
+    await stores.capabilityStore.create({
+      id: 'metered-cap',
+      name: 'premium_search',
+      description: 'Premium search',
+      endpoint: 'http://tool.local/search',
+      method: 'POST',
+      input_schema: {},
+      output_schema: {},
+      auth_type: 'api_key',
+      tags: ['search'],
+      source_type: 'http',
+      status: 'active',
+      provider: 'premium',
+      category: 'search',
+      tenant_id: 'default',
+      cost_class: 'paid',
+      estimated_cost_usd: 20,
+      risk_level: 'medium',
+      execution_mode_default: 'bounded_auto'
+    });
+
+    await stores.executionLogStore.create({ id: 'spent-1', capability_id: 'old-cap', success: true, estimated_cost_usd: 15, tenant_id: 'default', created_at: '2026-04-10T10:00:00.000Z' });
+
+    const preview = await request(app)
+      .post('/execute/preview')
+      .send({ capability_id: 'metered-cap', payload: {}, execution_mode: 'full_auto' });
+
+    assert.equal(preview.status, 403);
+    assert.equal(preview.body.policy.reasons.includes('rolling_budget_exceeded'), true);
+  } finally {
+    delete process.env.ADMIN_API_KEY;
+    await closeServer(server);
+  }
+});
+
+test('safest selection prefers lower-risk lower-cost tools', async () => {
+  const { app, server, stores, tenantPolicyService } = await buildTestHarness();
+  try {
+    tenantPolicyService.setPolicy('default', { safest_selection_default: true });
+
+    await stores.capabilityStore.create({ id: 'safe-cap', name: 'safe_search', description: 'safe search', endpoint: 'http://safe.local', method: 'POST', input_schema: {}, output_schema: {}, auth_type: 'none', tags: ['search'], source_type: 'http', status: 'active', provider: 'safe', category: 'search', tenant_id: 'default', cost_class: 'free', estimated_cost_usd: 0, risk_level: 'low', execution_mode_default: 'full_auto', rating: 3 });
+    await stores.capabilityStore.create({ id: 'risky-cap', name: 'risky_search', description: 'safe search', endpoint: 'http://risky.local', method: 'POST', input_schema: {}, output_schema: {}, auth_type: 'api_key', tags: ['search'], source_type: 'http', status: 'active', provider: 'risky', category: 'search', tenant_id: 'default', cost_class: 'paid', estimated_cost_usd: 10, risk_level: 'high', execution_mode_default: 'bounded_auto', rating: 5 });
+
+    const discover = await request(app)
+      .post('/discover')
+      .send({ query: 'safe search', filters: {} });
+
+    assert.equal(discover.status, 200);
+    assert.equal(discover.body[0].id, 'safe-cap');
+    assert.equal(discover.body[0].safety_score >= discover.body[1].safety_score, true);
+  } finally {
     await closeServer(server);
   }
 });

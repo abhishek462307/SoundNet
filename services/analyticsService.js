@@ -7,9 +7,9 @@ class AnalyticsService {
   }
 
   async getSummary(options = {}) {
-    const capabilities = await this.capabilityStore.list();
-    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
-    const queryLogs = filterByDateRange(this.queryLogStore ? await this.queryLogStore.list() : [], options, 'created_at');
+    const capabilities = filterByTenant(await this.capabilityStore.list(), options.tenant_id);
+    const logs = filterByTenant(filterByDateRange(await this.executionLogStore.list(), options, 'created_at'), options.tenant_id);
+    const queryLogs = filterByTenant(filterByDateRange(this.queryLogStore ? await this.queryLogStore.list() : [], options, 'created_at'), options.tenant_id);
 
     const totalExecutions = logs.length;
     const successfulExecutions = logs.filter((log) => log.success).length;
@@ -31,16 +31,16 @@ class AnalyticsService {
   }
 
   async getCapabilityStats(options = {}) {
-    const capabilities = await this.capabilityStore.list();
-    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
+    const capabilities = filterByTenant(await this.capabilityStore.list(), options.tenant_id);
+    const logs = filterByTenant(filterByDateRange(await this.executionLogStore.list(), options, 'created_at'), options.tenant_id);
     const items = capabilities.map((capability) => buildCapabilityAnalytics(capability, logs));
     return paginate(items, options);
   }
 
   async getServerStats(options = {}) {
-    const servers = await this.mcpServerStore.list();
-    const capabilities = await this.capabilityStore.list();
-    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
+    const servers = filterByTenant(await this.mcpServerStore.list(), options.tenant_id);
+    const capabilities = filterByTenant(await this.capabilityStore.list(), options.tenant_id);
+    const logs = filterByTenant(filterByDateRange(await this.executionLogStore.list(), options, 'created_at'), options.tenant_id);
 
     const items = servers.map((server) => {
       const serverCapabilities = capabilities.filter((capability) => capability.source_server_id === server.id);
@@ -69,8 +69,8 @@ class AnalyticsService {
   }
 
   async getTopTools(limit = 5, options = {}) {
-    const capabilities = await this.capabilityStore.list();
-    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
+    const capabilities = filterByTenant(await this.capabilityStore.list(), options.tenant_id);
+    const logs = filterByTenant(filterByDateRange(await this.executionLogStore.list(), options, 'created_at'), options.tenant_id);
 
     return capabilities
       .map((capability) => buildCapabilityAnalytics(capability, logs))
@@ -84,7 +84,7 @@ class AnalyticsService {
   }
 
   async getTopQueries(limit = 10, options = {}) {
-    const queryLogs = filterByDateRange(this.queryLogStore ? await this.queryLogStore.list() : [], options, 'created_at');
+    const queryLogs = filterByTenant(filterByDateRange(this.queryLogStore ? await this.queryLogStore.list() : [], options, 'created_at'), options.tenant_id);
     const summary = new Map();
 
     for (const log of queryLogs) {
@@ -113,7 +113,7 @@ class AnalyticsService {
   }
 
   async getExecutionTrends(options = {}) {
-    const logs = filterByDateRange(await this.executionLogStore.list(), options, 'created_at');
+    const logs = filterByTenant(filterByDateRange(await this.executionLogStore.list(), options, 'created_at'), options.tenant_id);
     const buckets = new Map();
 
     for (const log of logs) {
@@ -147,6 +147,41 @@ class AnalyticsService {
         failed_executions: entry.failed_executions,
         average_latency_ms: entry.total_executions ? entry.total_latency_ms / entry.total_executions : null
       }));
+  }
+
+  async getPolicyAnalytics(options = {}) {
+    const logs = filterByTenant(filterByDateRange(await this.executionLogStore.list(), options, 'created_at'), options.tenant_id);
+    const spend24hBoundary = Date.now() - (24 * 60 * 60 * 1000);
+    const spend7dBoundary = Date.now() - (7 * 24 * 60 * 60 * 1000);
+
+    let spend24hUsd = 0;
+    let spend7dUsd = 0;
+    let boundedAutoExecutions = 0;
+    let manualExecutions = 0;
+    let fullAutoExecutions = 0;
+
+    for (const log of logs) {
+      const created = Date.parse(log.created_at || 0);
+      const cost = Number(log.estimated_cost_usd || 0);
+      if (created >= spend24hBoundary) {
+        spend24hUsd += cost;
+      }
+      if (created >= spend7dBoundary) {
+        spend7dUsd += cost;
+      }
+
+      if (log.execution_mode === 'bounded_auto') boundedAutoExecutions += 1;
+      if (log.execution_mode === 'manual') manualExecutions += 1;
+      if (log.execution_mode === 'full_auto') fullAutoExecutions += 1;
+    }
+
+    return {
+      spend_24h_usd: spend24hUsd,
+      spend_7d_usd: spend7dUsd,
+      bounded_auto_executions: boundedAutoExecutions,
+      manual_executions: manualExecutions,
+      full_auto_executions: fullAutoExecutions
+    };
   }
 }
 
@@ -260,6 +295,10 @@ function normalizeOffset(value, fallback) {
 
 function toDayBucket(value) {
   return new Date(value).toISOString().slice(0, 10);
+}
+
+function filterByTenant(items, tenantId) {
+  return items.filter((item) => (item.tenant_id || 'default') === (tenantId || 'default'));
 }
 
 module.exports = { AnalyticsService };

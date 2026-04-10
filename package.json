@@ -4,7 +4,10 @@
   "description": "Service Orchestration Unified Network for Discovery, Navigation, Execution, and Transport",
   "main": "server.js",
   "scripts": {
+    "build": "npm test",
     "dev": "nodemon server.js",
+    "dev:web": "npm --prefix web run dev -- --host 0.0.0.0",
+    "build:web": "npm --prefix web run build",
     "start": "node server.js",
     "test": "node --test tests/*.test.js",
     "db:bootstrap": "node scripts/bootstrap-db.js"

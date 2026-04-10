@@ -21,6 +21,7 @@ class AgentService {
       description: input.description,
       endpoint: input.endpoint,
       protocol: input.protocol || 'http',
+      tenant_id: input.tenant_id || 'default',
       trust_score: typeof input.trust_score === 'number' ? input.trust_score : 0,
       tags: input.tags || [],
       capabilities: input.capabilities || [],
@@ -31,11 +32,12 @@ class AgentService {
     return this.agentStore.create(agent);
   }
 
-  async listAgents() {
-    return this.agentStore.list();
+  async listAgents(options = {}) {
+    const agents = await this.agentStore.list();
+    return filterByTenant(agents, options.tenant_id);
   }
 
-  async discoverAgents(query) {
+  async discoverAgents(query, options = {}) {
     if (!query || typeof query !== 'string') {
       const error = new Error('query is required');
       error.status = 400;
@@ -43,7 +45,7 @@ class AgentService {
     }
 
     const queryTokens = tokenize(query);
-    const agents = await this.agentStore.list();
+    const agents = filterByTenant(await this.agentStore.list(), options.tenant_id);
 
     return agents
       .map((agent) => {
@@ -64,6 +66,10 @@ class AgentService {
         score
       }));
   }
+}
+
+function filterByTenant(items, tenantId) {
+  return items.filter((item) => (item.tenant_id || 'default') === (tenantId || 'default'));
 }
 
 function tokenize(value) {

@@ -3,13 +3,16 @@ const { validateCapabilityInput, validateExecuteInput } = require('../utils/vali
 const { computeCapabilityRank } = require('../utils/keywordScore');
 const { requestJsonWithRetry } = require('../utils/httpClient');
 const { dedupeCapabilities } = require('../utils/dedupe');
+const { PolicyService, deriveDefaultExecutionMode } = require('./policyService');
 
 class CapabilityService {
-  constructor({ capabilityStore, executionLogStore, queryLogStore, baseUrl }) {
+  constructor({ capabilityStore, executionLogStore, queryLogStore, baseUrl, policyService, tenantPolicyService }) {
     this.capabilityStore = capabilityStore;
     this.executionLogStore = executionLogStore;
     this.queryLogStore = queryLogStore;
     this.baseUrl = baseUrl;
+    this.policyService = policyService || new PolicyService({ tenantPolicyService });
+    this.tenantPolicyService = tenantPolicyService || null;
   }
 
   async seedMockCapability() {
@@ -49,7 +52,12 @@ class CapabilityService {
       status: 'active',
       last_seen_at: new Date().toISOString(),
       provider: 'local',
-      category: 'food'
+      category: 'food',
+      tenant_id: 'default',
+      cost_class: 'paid',
+      estimated_cost_usd: 10,
+      risk_level: 'medium',
+      execution_mode_default: 'bounded_auto'
     });
   }
 
@@ -74,7 +82,12 @@ class CapabilityService {
       status: 'active',
       last_seen_at: new Date().toISOString(),
       provider: input.provider || 'custom',
-      category: input.category || 'general'
+      category: input.category || 'general',
+      tenant_id: input.tenant_id || 'default',
+      cost_class: input.cost_class || 'free',
+      estimated_cost_usd: typeof input.estimated_cost_usd === 'number' ? input.estimated_cost_usd : 0,
+      risk_level: input.risk_level || 'low',
+      execution_mode_default: input.execution_mode_default || deriveDefaultExecutionMode(input)
     };
 
     return this.capabilityStore.create(capability);
@@ -97,15 +110,15 @@ class CapabilityService {
     }
   }
 
-  async discoverCapabilities(query, filters = {}) {
+  async discoverCapabilities(query, filters = {}, options = {}) {
     if (!query || typeof query !== 'string') {
       const error = new Error('query is required');
       error.status = 400;
       throw error;
     }
 
-    const capabilities = await this.capabilityStore.list();
-    const logs = await this.executionLogStore.list();
+    const capabilities = filterByTenant(await this.capabilityStore.list(), options.tenant_id);
+    const logs = filterByTenant(await this.executionLogStore.list(), options.tenant_id);
     const statsByCapability = buildExecutionStats(logs);
 
     const ranked = capabilities
@@ -114,14 +127,24 @@ class CapabilityService {
       .map((capability) => {
         const executionStats = statsByCapability.get(capability.id) || { successRate: null, totalRuns: 0, averageLatencyMs: null };
         const ranking = computeCapabilityRank(query, capability, executionStats);
+        const safetyScore = computeSafetyScore(capability, executionStats);
         return {
           capability,
           executionStats,
+          safetyScore,
           ...ranking
         };
       })
       .filter((entry) => entry.keywordScore > 0)
-      .sort((left, right) => right.totalScore - left.totalScore);
+      .sort((left, right) => {
+          if (options.safest === true || options.safest === 'true' || (awaitMaybePolicy(this.tenantPolicyService, options.tenant_id)).safest_selection_default) {
+            if (right.safetyScore !== left.safetyScore) {
+              return right.safetyScore - left.safetyScore;
+            }
+            return right.totalScore - left.totalScore;
+        }
+        return right.totalScore - left.totalScore;
+      });
 
     const results = dedupeCapabilities(ranked)
       .slice(0, 5)
@@ -135,6 +158,11 @@ class CapabilityService {
         status: capability.status,
         provider: capability.provider || null,
         category: capability.category || null,
+        cost_class: capability.cost_class || 'free',
+        estimated_cost_usd: Number(capability.estimated_cost_usd || 0),
+        risk_level: capability.risk_level || 'low',
+        execution_mode_default: capability.execution_mode_default || deriveDefaultExecutionMode(capability),
+        safety_score: computeSafetyScore(capability, executionStats),
         score: totalScore,
         keyword_score: keywordScore,
         success_rate: executionStats.successRate,
@@ -146,8 +174,9 @@ class CapabilityService {
       await this.queryLogStore.create({
         id: crypto.randomUUID(),
         query,
-        filters,
+        filters: { ...filters, tenant_id: options.tenant_id || 'default' },
         result_count: results.length,
+        tenant_id: options.tenant_id || 'default',
         created_at: new Date().toISOString()
       });
     }
@@ -155,11 +184,17 @@ class CapabilityService {
     return results;
   }
 
-  async executeCapability(input, mcpServerService) {
+  async executeCapability(input, mcpServerService, options = {}) {
     validateExecuteInput(input);
     const capability = await this.capabilityStore.findById(input.capability_id);
 
     if (!capability) {
+      const error = new Error('capability_id not found');
+      error.status = 404;
+      throw error;
+    }
+
+    if ((capability.tenant_id || 'default') !== (options.tenant_id || 'default')) {
       const error = new Error('capability_id not found');
       error.status = 404;
       throw error;
@@ -170,6 +205,11 @@ class CapabilityService {
       error.status = 409;
       throw error;
     }
+
+    const policyDecision = await this.policyService.evaluateCapabilityExecution(capability, input, {
+      ...options,
+      rolling_spent_usd: await this.calculateRollingSpendUsd(options.tenant_id)
+    });
 
     const startedAt = Date.now();
     try {
@@ -190,13 +230,17 @@ class CapabilityService {
         success: true,
         latency_ms: Date.now() - startedAt,
         created_at: new Date().toISOString(),
-        error: null
+        error: null,
+        tenant_id: capability.tenant_id || 'default',
+        execution_mode: policyDecision.execution_mode,
+        estimated_cost_usd: policyDecision.estimated_cost_usd
       });
 
       return {
         capability_id: capability.id,
         capability_name: capability.name,
         source_type: capability.source_type || 'http',
+        policy: policyDecision,
         response
       };
     } catch (error) {
@@ -207,7 +251,10 @@ class CapabilityService {
         success: false,
         latency_ms: Date.now() - startedAt,
         created_at: new Date().toISOString(),
-        error: error.message
+        error: error.message,
+        tenant_id: capability.tenant_id || 'default',
+        execution_mode: input.execution_mode || capability.execution_mode_default || deriveDefaultExecutionMode(capability),
+        estimated_cost_usd: Number(capability.estimated_cost_usd || 0)
       });
 
       error.status = error.status || 502;
@@ -215,13 +262,79 @@ class CapabilityService {
     }
   }
 
-  async listCapabilities() {
-    return this.capabilityStore.list();
+  async listCapabilities(options = {}) {
+    return filterByTenant(await this.capabilityStore.list(), options.tenant_id);
   }
 
-  async listExecutionLogs() {
-    return this.executionLogStore.list();
+  async listExecutionLogs(options = {}) {
+    return filterByTenant(await this.executionLogStore.list(), options.tenant_id);
   }
+
+  async previewExecution(input, options = {}) {
+    if (!input?.capability_id) {
+      const error = new Error('capability_id is required');
+      error.status = 400;
+      throw error;
+    }
+
+    const capability = await this.capabilityStore.findById(input.capability_id);
+    if (!capability || (capability.tenant_id || 'default') !== (options.tenant_id || 'default')) {
+      const error = new Error('capability_id not found');
+      error.status = 404;
+      throw error;
+    }
+
+    return {
+      capability_id: capability.id,
+      capability_name: capability.name,
+      policy: await this.policyService.evaluateCapabilityExecution(capability, input, {
+        ...options,
+        rolling_spent_usd: await this.calculateRollingSpendUsd(options.tenant_id)
+      })
+    };
+  }
+
+  async calculateRollingSpendUsd(tenantId = 'default') {
+    const logs = filterByTenant(await this.executionLogStore.list(), tenantId);
+    return logs.reduce((sum, log) => sum + Number(log.estimated_cost_usd || 0), 0);
+  }
+
+  async calculateRollingSpendWindows(tenantId = 'default') {
+    const logs = filterByTenant(await this.executionLogStore.list(), tenantId);
+    const now = Date.now();
+    const dayAgo = now - (24 * 60 * 60 * 1000);
+    const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
+    let spend24h = 0;
+    let spend7d = 0;
+
+    for (const log of logs) {
+      const created = Date.parse(log.created_at || 0);
+      const cost = Number(log.estimated_cost_usd || 0);
+      if (created >= weekAgo) {
+        spend7d += cost;
+      }
+      if (created >= dayAgo) {
+        spend24h += cost;
+      }
+    }
+
+    return { spend_24h_usd: spend24h, spend_7d_usd: spend7d };
+  }
+}
+
+function awaitMaybePolicy(tenantPolicyService, tenantId) {
+  return tenantPolicyService ? { safest_selection_default: true, ...(tenantPolicyService.policies?.get?.(tenantId || 'default') || {}) } : { safest_selection_default: false };
+}
+
+function computeSafetyScore(capability, executionStats) {
+  const costPenalty = capability.cost_class === 'free' ? 2 : capability.cost_class === 'metered' ? 1 : 0;
+  const riskBonus = capability.risk_level === 'low' ? 2 : capability.risk_level === 'medium' ? 1 : 0;
+  const successBonus = typeof executionStats.successRate === 'number' ? executionStats.successRate : 0;
+  return costPenalty + riskBonus + successBonus;
+}
+
+function filterByTenant(items, tenantId) {
+  return items.filter((item) => (item.tenant_id || 'default') === (tenantId || 'default'));
 }
 
 function buildExecutionStats(logs) {

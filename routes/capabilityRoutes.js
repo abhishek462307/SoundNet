@@ -38,6 +38,7 @@ module.exports = function capabilityRoutes(injected = {}) {
   router.post('/register', capabilityController.registerCapability);
   router.post('/discover', capabilityController.discoverCapabilities);
   router.post('/execute', capabilityController.executeCapability);
+  router.post('/execute/preview', capabilityController.previewExecution);
   router.get('/capabilities', capabilityController.listCapabilities);
   router.get('/logs', capabilityController.listExecutionLogs);
 

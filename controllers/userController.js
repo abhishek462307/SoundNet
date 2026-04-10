@@ -4,7 +4,7 @@ function getService(req) {
 
 async function registerUser(req, res, next) {
   try {
-    const result = await getService(req).registerUser(req.body);
+    const result = await getService(req).registerUser({ ...req.body, tenant_id: req.tenantId });
     res.status(201).json(result);
   } catch (error) {
     next(error);
@@ -14,7 +14,7 @@ async function registerUser(req, res, next) {
 async function listUsers(req, res, next) {
   try {
     const result = await getService(req).listUsers();
-    res.json(result);
+    res.json(result.filter((user) => user.tenant_id === req.tenantId));
   } catch (error) {
     next(error);
   }

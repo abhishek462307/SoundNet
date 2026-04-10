@@ -35,6 +35,24 @@ function validateCapabilityInput(input) {
     error.status = 400;
     throw error;
   }
+
+  if (typeof input.cost_class !== 'undefined' && !['free', 'metered', 'paid'].includes(input.cost_class)) {
+    const error = new Error('cost_class must be free, metered, or paid');
+    error.status = 400;
+    throw error;
+  }
+
+  if (typeof input.risk_level !== 'undefined' && !['low', 'medium', 'high'].includes(input.risk_level)) {
+    const error = new Error('risk_level must be low, medium, or high');
+    error.status = 400;
+    throw error;
+  }
+
+  if (typeof input.execution_mode_default !== 'undefined' && !['full_auto', 'bounded_auto', 'manual'].includes(input.execution_mode_default)) {
+    const error = new Error('execution_mode_default must be full_auto, bounded_auto, or manual');
+    error.status = 400;
+    throw error;
+  }
 }
 
 function validateExecuteInput(input) {

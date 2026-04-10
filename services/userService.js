@@ -7,6 +7,7 @@ class UserService {
 
   async registerUser(input) {
     validateUserInput(input);
+    const tenantId = input.tenant_id || 'default';
     const existing = await this.userStore.findByEmail(input.email);
     if (existing) {
       const error = new Error('email already exists');
@@ -20,6 +21,7 @@ class UserService {
       email: input.email,
       name: input.name,
       role: input.role || 'user',
+      tenant_id: tenantId,
       api_token_hash: hashToken(apiToken),
       token_last_four: apiToken.slice(-4),
       token_created_at: new Date().toISOString(),
@@ -102,6 +104,7 @@ function toUserResponse(user, plainToken) {
     email: user.email,
     name: user.name,
     role: user.role,
+    tenant_id: user.tenant_id || 'default',
     token_last_four: user.token_last_four || null,
     token_created_at: user.token_created_at || null,
     revoked_at: user.revoked_at || null,

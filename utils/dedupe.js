@@ -11,16 +11,20 @@ function normalizeToolIdentity(entry) {
 
 function dedupeCapabilities(entries) {
   const bestByIdentity = new Map();
+  const order = [];
 
   for (const entry of entries) {
     const identity = normalizeToolIdentity(entry);
     const existing = bestByIdentity.get(identity);
+    if (!bestByIdentity.has(identity)) {
+      order.push(identity);
+    }
     if (!existing || entry.totalScore > existing.totalScore) {
       bestByIdentity.set(identity, entry);
     }
   }
 
-  return Array.from(bestByIdentity.values()).sort((left, right) => right.totalScore - left.totalScore);
+  return order.map((identity) => bestByIdentity.get(identity));
 }
 
 module.exports = { dedupeCapabilities };

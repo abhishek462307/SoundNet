@@ -2,7 +2,7 @@ function getConfig() {
   const config = {
     nodeEnv: process.env.NODE_ENV || 'development',
     port: Number(process.env.PORT || 3000),
-    appBaseUrl: process.env.APP_BASE_URL || `http://127.0.0.1:${process.env.PORT || 3000}`,
+    appBaseUrl: process.env.APP_BASE_URL || process.env.RENDER_EXTERNAL_URL || process.env.RAILWAY_STATIC_URL || '',
     databaseUrl: process.env.DATABASE_URL || '',
     apiKey: process.env.API_KEY || '',
     adminApiKey: process.env.ADMIN_API_KEY || '',
@@ -34,13 +34,8 @@ function validateConfig(config) {
     throw new Error('MESSAGE_RETRY_BASE_DELAY_MS must be a positive integer');
   }
 
-  if (config.nodeEnv === 'production') {
-    if (!config.apiKey) {
-      throw new Error('API_KEY is required in production');
-    }
-    if (!config.adminApiKey) {
-      throw new Error('ADMIN_API_KEY is required in production');
-    }
+  if (config.nodeEnv === 'production' && !config.appBaseUrl) {
+    throw new Error('APP_BASE_URL is required in production unless the hosting platform provides a public URL');
   }
 }
 

@@ -4,7 +4,7 @@ function getService(req) {
 
 async function listServers(req, res, next) {
   try {
-    const servers = await getService(req).listServers(req.query);
+    const servers = await getService(req).listServers(req.query, { tenant_id: req.tenantId });
     res.json(servers);
   } catch (error) {
     next(error);
@@ -13,7 +13,7 @@ async function listServers(req, res, next) {
 
 async function registerServer(req, res, next) {
   try {
-    const server = await getService(req).registerServer(req.body);
+    const server = await getService(req).registerServer({ ...req.body, tenant_id: req.tenantId });
     res.status(201).json(server);
   } catch (error) {
     next(error);
@@ -31,7 +31,7 @@ async function syncServer(req, res, next) {
 
 async function syncAllServers(req, res, next) {
   try {
-    const result = await getService(req).syncAllServers();
+    const result = await getService(req).syncAllServers({ tenant_id: req.tenantId });
     res.json(result);
   } catch (error) {
     next(error);
@@ -49,7 +49,7 @@ async function checkServerHealth(req, res, next) {
 
 async function checkAllServerHealth(req, res, next) {
   try {
-    const result = await getService(req).checkAllServerHealth();
+    const result = await getService(req).checkAllServerHealth({ tenant_id: req.tenantId });
     res.json(result);
   } catch (error) {
     next(error);

@@ -44,6 +44,16 @@ or:
 x-user-token: <api_token>
 ```
 
+### Tenant routing
+Sound Net supports a tenant foundation using:
+
+```http
+x-tenant-id: <tenant-id>
+```
+
+If an authenticated user token is present, the user tenant takes precedence over the header.
+Current tenant scoping applies to users, agents, messages, capabilities, MCP servers, and analytics queries.
+
 ## Capabilities
 
 ### `GET /capabilities`
@@ -93,9 +103,24 @@ Example body:
   "payload": {
     "item": "pizza",
     "quantity": 1
-  }
+  },
+  "budget_limit_usd": 20,
+  "execution_mode": "bounded_auto"
 }
 ```
+
+### `POST /execute/preview`
+Returns the autonomy policy decision for a capability execution without executing it.
+
+Money-involved tools default to `bounded_auto`. High-risk tools are blocked from `full_auto`.
+
+### `GET /policy/tenant`
+Returns the active tenant policy profile.
+
+### `POST /policy/tenant`
+Updates the tenant policy profile, including `max_execution_mode`, `rolling_budget_limit_usd`, `safest_selection_default`, and `blocked_risk_levels`.
+
+Tenant policy profiles are now persisted in the local data layer.
 
 ### `GET /logs`
 Lists execution logs.
@@ -137,8 +162,12 @@ Bulk syncs trusted servers.
 ### `GET /catalog/mcp`
 Lists seedable trusted MCP catalog entries.
 
+The catalog now includes a curated market view of existing MCP servers and collections from providers such as GitHub, Perplexity, Firecrawl, BrowserStack, SmartBear, AWS, Oracle, and Brave. Some entries are informational and marked for manual setup rather than automatic seeding.
+
 ### `POST /catalog/mcp/seed`
 Seeds catalog entries into the system.
+
+Only entries marked as directly seedable are auto-registered. Providers that require credentials, local stdio setup, OAuth, or custom deployment are returned as manual-setup catalog items and skipped during seed.
 
 ## Agents
 
@@ -225,6 +254,9 @@ Most common discovery queries.
 ### `GET /analytics/trends/executions`
 Daily execution trend buckets with totals, success/failure counts, and average latency.
 
+### `GET /analytics/policy`
+Returns policy-oriented analytics such as spend over the last 24 hours and 7 days, plus execution counts by autonomy mode.
+
 ## Audit
 
 ### `GET /audit`
@@ -234,6 +266,8 @@ Lists audit log entries.
 
 ### `POST /users/register`
 Registers a local Sound Net user and returns an API token.
+
+Users, agents, and messages are tenant-scoped through `x-tenant-id`.
 
 Example body:
 
