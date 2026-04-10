@@ -9,6 +9,7 @@ const { AnalyticsService } = require('./services/analyticsService');
 const { AgentService } = require('./services/agentService');
 const { MessageService } = require('./services/messageService');
 const { AuditService } = require('./services/auditService');
+const { UserService } = require('./services/userService');
 const { createCapabilityStore } = require('./models/capabilityStore');
 const { createExecutionLogStore } = require('./models/executionLogStore');
 const { createMcpServerStore } = require('./models/mcpServerStore');
@@ -16,6 +17,7 @@ const { createQueryLogStore } = require('./models/queryLogStore');
 const { createAgentStore } = require('./models/agentStore');
 const { createMessageStore } = require('./models/messageStore');
 const { createAuditLogStore } = require('./models/auditLogStore');
+const { createUserStore } = require('./models/userStore');
 
 async function bootstrap() {
   const config = getConfig();
@@ -28,6 +30,7 @@ async function bootstrap() {
   const agentStore = await createAgentStore();
   const messageStore = await createMessageStore();
   const auditLogStore = await createAuditLogStore();
+  const userStore = await createUserStore();
 
   const capabilityService = new CapabilityService({ capabilityStore, executionLogStore, queryLogStore, baseUrl: config.appBaseUrl });
   const mcpServerService = new MpcServerService({ mcpServerStore, capabilityStore, baseUrl: config.appBaseUrl });
@@ -38,12 +41,10 @@ async function bootstrap() {
   const agentService = new AgentService({ agentStore });
   const messageService = new MessageService({ agentStore, messageStore });
   const auditService = new AuditService({ auditLogStore });
+  const userService = new UserService({ userStore });
 
-  const app = createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, readinessState });
-  const server = await new Promise((resolve, reject) => {
-    const instance = app.listen(config.port, () => resolve(instance));
-    instance.on('error', reject);
-  });
+  const app = createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, userService, readinessState });
+  const server = await new Promise((resolve, reject) => { const instance = app.listen(config.port, ()=>resolve(instance)); instance.on('error', reject); });
 
   const shutdown = async (signal) => {
     try {
@@ -75,7 +76,7 @@ async function bootstrap() {
     throw error;
   }
 
-  console.log(`Agent Network API listening on ${config.appBaseUrl}`);
+  console.log(`Sound Net API listening on ${config.appBaseUrl}`);
 }
 
 bootstrap().catch((error) => {

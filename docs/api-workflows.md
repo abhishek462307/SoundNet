@@ -1,6 +1,6 @@
 # API Workflows
 
-This guide explains the main workflows supported by Agent Network.
+This guide explains the main workflows supported by Sound Net.
 
 ## Capability workflow
 
@@ -25,6 +25,19 @@ This guide explains the main workflows supported by Agent Network.
 2. Discover it with `POST /agents/discover`
 3. Send a message with `POST /messages`
 4. Read inbox with `GET /messages/inbox/:agentId`
+5. Inspect a conversation with `GET /messages/threads/:threadId`
+6. Acknowledge receipt with `POST /messages/:messageId/ack`
+7. Inspect the delivery queue with `GET /messages/queue/delivery`
+8. Process scheduled and retryable messages with `POST /messages/queue/process`
+
+## Operator auth workflow
+
+1. Register an operator with `POST /users/register`
+2. Save the returned `api_token`
+3. Call `GET /users/me` with `Authorization: Bearer <token>`
+4. Use an admin token for admin routes like `GET /users`
+5. Rotate a credential with `POST /users/:userId/rotate-token`
+6. Revoke a credential with `POST /users/:userId/revoke-token`
 
 ## Analytics workflow
 

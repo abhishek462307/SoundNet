@@ -20,4 +20,43 @@ async function getInbox(req, res, next) {
   }
 }
 
-module.exports = { sendMessage, getInbox };
+async function getThread(req, res, next) {
+  try {
+    const result = await getService(req).getThread(req.params.threadId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function acknowledgeMessage(req, res, next) {
+  try {
+    const result = await getService(req).acknowledgeMessage(req.params.messageId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getDeliveryQueue(req, res, next) {
+  try {
+    const result = await getService(req).listDeliveryQueue(req.query.before);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function processDeliveryQueue(req, res, next) {
+  try {
+    const result = await getService(req).processDeliveryQueue({
+      now: req.body?.now,
+      failMessageIds: req.body?.fail_message_ids || []
+    });
+    res.json({ processed: result.length, messages: result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { sendMessage, getInbox, getThread, acknowledgeMessage, getDeliveryQueue, processDeliveryQueue };

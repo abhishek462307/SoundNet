@@ -18,15 +18,18 @@ Sound Net already includes:
 
 ### 1. Security and access control
 - admin auth hardening
-- RBAC
+- RBAC foundation with built-in user tokens and admin role enforcement
+- token rotation and revocation for operator accounts
 - tenant isolation
 - secrets management integration
 
 ### 2. Messaging upgrades
+- threads / conversations foundation
+- acknowledgement flow for agent messages
+- scheduled delivery and retry queue foundation
 - realtime delivery
 - webhook delivery
-- retries and acknowledgement
-- threads / conversations
+- delivery workers and webhook retry backoff
 
 ### 3. Analytics upgrades
 - time-window analytics

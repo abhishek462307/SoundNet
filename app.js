@@ -9,14 +9,21 @@ const analyticsRoutes = require('./routes/analyticsRoutes');
 const agentRoutes = require('./routes/agentRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const auditRoutes = require('./routes/auditRoutes');
-const { requireApiKey, requireAdminKey } = require('./middleware/auth');
+const userRoutes = require('./routes/userRoutes');
+const { requireApiKey, resolveUser, requireAdminKey } = require('./middleware/auth');
 const { helmetMiddleware, apiLimiter } = require('./middleware/requestProtection');
 
-function createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, readinessState } = {}) {
+function createApp({ capabilityService, mcpServerService, schedulerService, mcpCatalogService, dataRepairService, analyticsService, agentService, messageService, auditService, userService, readinessState } = {}) {
   const app = express();
   app.use(helmetMiddleware);
   app.use(express.json({ limit: '1mb' }));
   app.use(apiLimiter);
+
+  app.use((req, _res, next) => {
+    req.userService = userService;
+    next();
+  });
+  app.use(resolveUser);
 
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'agent-network-mvp' }));
   app.get('/ready', (_req, res) => {
@@ -35,6 +42,7 @@ function createApp({ capabilityService, mcpServerService, schedulerService, mcpC
   app.use('/agents', agentRoutes({ agentService }));
   app.use('/messages', messageRoutes({ messageService }));
   app.use('/audit', requireAdminKey, auditRoutes({ auditService }));
+  app.use('/users', userRoutes({ userService }));
   app.use('/system', requireAdminKey, systemRoutes({ schedulerService, dataRepairService }));
   app.use('/', capabilityRoutes({ capabilityService, mcpServerService }));
   app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message || 'Internal server error' }));

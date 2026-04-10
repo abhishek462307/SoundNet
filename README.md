@@ -158,6 +158,19 @@ Agents can publish:
 - description
 - endpoint
 - protocol
+
+### 6. User auth and RBAC
+Sound Net now supports a lightweight built-in user model for operator access.
+
+Current flow:
+
+- create a user with `POST /users/register`
+- receive a generated `api_token`
+- send that token in `Authorization: Bearer <token>` or `x-user-token: <token>`
+- access user-aware endpoints like `GET /users/me`
+- use admin-role users for admin-only routes such as user listing, analytics, audit, and system operations
+
+This is intentionally simple and self-hostable. It is a step above raw header-based role checks and creates a foundation for future roadmap items like tenant isolation, SSO, and secrets-backed auth.
 - trust score
 - tags
 - declared capabilities

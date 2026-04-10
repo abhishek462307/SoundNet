@@ -18,6 +18,39 @@ If `ADMIN_API_KEY` is set, admin routes require:
 x-admin-key: <value>
 ```
 
+### User Token Authentication
+Sound Net also supports built-in user authentication.
+
+Register a user:
+
+```http
+POST /users/register
+```
+
+Use the returned token with either:
+
+```http
+Authorization: Bearer <api_token>
+```
+
+or:
+
+```http
+x-user-token: <api_token>
+```
+
+When a valid admin user token is present, Sound Net grants admin access without requiring `x-admin-key`.
+
+### Current RBAC Rules
+- `user` can access `GET /users/me`
+- `admin` can access `GET /users`
+- `admin` can access admin-protected analytics, audit, MCP management, and system routes
+
+### Security Notes
+- user tokens are randomly generated UUID credentials
+- tokens are currently stored directly in the backing store
+- this is suitable for MVP and self-hosted deployments, but production hardening should include hashing, rotation, revocation, and external identity integration
+
 ### Security Headers
 Sound Net uses `helmet` for standard HTTP security headers.
 
